@@ -67,3 +67,8 @@ You can override mode or cadence per session:
 - Heartbeats never show typing, regardless of mode.
 - `typingIntervalSeconds` controls the **refresh cadence**, not the start time.
   The default is 6 seconds.
+- On Telegram, slash commands such as `/new` or `/reset` also emit the ack
+  reaction and typing indicator when `channels.telegram.reactionLevel` is
+  `ack` and `messages.ackReactionScope` allows it (for example `direct` in
+  DMs, `group-all` or `group-mentions` in groups). Slash commands are treated
+  as explicit user invocations, so group mention gating is bypassed.

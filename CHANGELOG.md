@@ -27,6 +27,7 @@ Docs: https://docs.openclaw.ai
 - Matrix/commands: recognize slash commands that are prefixed with the bot's Matrix mention, so room messages like `@bot:server /new` trigger the command path without requiring custom mention regexes. (#68570) Thanks @nightq and @johnlanni.
 - Agents/subagents: include requested role and runtime timing on subagent failure payloads so parent agents can correlate failed or timed-out child work. (#68726) Thanks @BKF-Gitty.
 - Gateway/sessions: reject stale agent-scoped sessions after an agent is removed from config while preserving legacy default-agent main-session aliases. (#65986) Thanks @bittoby.
+- Telegram/slash commands: emit the ack reaction and typing indicator when a user sends a slash command (for example `/new`, `/reset`), so `reactionLevel: "ack"` with `ackReactionScope: "direct"` (or `"all"`/`"group-all"`/`"group-mentions"`) now produces the same instant feedback for commands as for regular messages. (#68955)
 
 ## 2026.4.19-beta.2
 
