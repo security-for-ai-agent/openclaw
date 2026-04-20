@@ -599,6 +599,8 @@ export function createTelegramBot(opts: TelegramBotOptions): TelegramBotInstance
     shouldSkipUpdate,
     opts,
     telegramDeps,
+    ackReactionScope,
+    sendChatActionHandler,
   });
 
   registerTelegramHandlers({

@@ -1,4 +1,5 @@
 import type { Bot, Context } from "grammy";
+import type { AckReactionScope } from "openclaw/plugin-sdk/channel-feedback";
 import { resolveChannelStreamingBlockEnabled } from "openclaw/plugin-sdk/channel-streaming";
 import {
   resolveCommandAuthorization,
@@ -45,6 +46,7 @@ import {
   buildPluginTelegramMenuCommands,
   syncTelegramMenuCommands as syncTelegramMenuCommandsRuntime,
 } from "./bot-native-command-menu.js";
+import { emitTelegramSlashCommandFeedback } from "./bot-native-commands.ack-feedback.js";
 import { TelegramUpdateKeyContext } from "./bot-updates.js";
 import type { TelegramBotOptions } from "./bot.types.js";
 import {
@@ -76,6 +78,7 @@ import {
 } from "./group-access.js";
 import { resolveTelegramGroupPromptSettings } from "./group-config-helpers.js";
 import { buildInlineKeyboard } from "./inline-keyboard.js";
+import type { TelegramSendChatActionHandler } from "./sendchataction-401-backoff.js";
 import { recordSentMessage } from "./sent-message-cache.js";
 
 const EMPTY_RESPONSE_FALLBACK = "No response generated. Please try again.";
@@ -244,6 +247,17 @@ export type RegisterTelegramNativeCommandsParams = {
   shouldSkipUpdate: (ctx: TelegramUpdateKeyContext) => boolean;
   telegramDeps?: TelegramNativeCommandDeps;
   opts: { token: string };
+  /**
+   * Resolved ack-reaction scope for this account. Slash commands reuse the
+   * same gate as regular messages; omit to keep pre-#68955 behavior (no ack /
+   * typing feedback on slash commands).
+   */
+  ackReactionScope?: AckReactionScope;
+  /**
+   * Shared sendChatAction handler (401 backoff / circuit breaker). Required to
+   * emit the slash-command typing indicator; omit to skip typing feedback.
+   */
+  sendChatActionHandler?: TelegramSendChatActionHandler;
 };
 
 async function resolveTelegramCommandAuth(params: {
@@ -480,7 +494,36 @@ export const registerTelegramNativeCommands = ({
   shouldSkipUpdate,
   telegramDeps = defaultTelegramNativeCommandDeps,
   opts,
+  ackReactionScope,
+  sendChatActionHandler,
 }: RegisterTelegramNativeCommandsParams) => {
+  const slashCommandReactionApi =
+    typeof bot.api.setMessageReaction === "function"
+      ? bot.api.setMessageReaction.bind(bot.api)
+      : null;
+  const emitSlashFeedback = async (params: {
+    agentId: string;
+    chatId: number;
+    messageId: number;
+    isGroup: boolean;
+    threadId?: number;
+  }): Promise<void> => {
+    if (!ackReactionScope || !sendChatActionHandler) {
+      return;
+    }
+    await emitTelegramSlashCommandFeedback({
+      cfg,
+      accountId,
+      agentId: params.agentId,
+      chatId: params.chatId,
+      messageId: params.messageId,
+      isGroup: params.isGroup,
+      threadId: params.threadId,
+      ackReactionScope,
+      reactionApi: slashCommandReactionApi,
+      sendChatActionHandler,
+    });
+  };
   const boundRoute =
     nativeEnabled && nativeSkillsEnabled
       ? resolveAgentRoute({ cfg, channel: "telegram", accountId })
@@ -769,6 +812,14 @@ export const registerTelegramNativeCommands = ({
         const originatingTo = buildTelegramRoutingTarget(chatId, threadSpec);
         const executionCfg = getRuntimeConfigSnapshot() ?? cfg;
 
+        void emitSlashFeedback({
+          agentId: route.agentId,
+          chatId,
+          messageId: msg.message_id,
+          isGroup,
+          threadId: threadSpec.id,
+        });
+
         const commandDefinition = findCommandByNativeName(command.name, "telegram");
         const rawText = ctx.match?.trim() ?? "";
         const commandArgs = commandDefinition
@@ -1035,6 +1086,13 @@ export const registerTelegramNativeCommands = ({
           return;
         }
         const { threadSpec, route, mediaLocalRoots, tableMode, chunkMode } = runtimeContext;
+        void emitSlashFeedback({
+          agentId: route.agentId,
+          chatId,
+          messageId: msg.message_id,
+          isGroup,
+          threadId: threadSpec.id,
+        });
         const deliveryBaseOptions = buildCommandDeliveryBaseOptions({
           chatId,
           accountId: route.accountId,
