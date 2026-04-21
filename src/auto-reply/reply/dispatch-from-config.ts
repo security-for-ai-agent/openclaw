@@ -676,6 +676,7 @@ export async function dispatchReplyFromConfig(
           senderId: hookContext.senderId,
           isGroup: hookContext.isGroup,
           timestamp: hookContext.timestamp,
+          messageId: messageIdForHook,
         },
         {
           channelId: hookContext.channelId,

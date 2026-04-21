@@ -3162,6 +3162,36 @@ describe("before_dispatch hook", () => {
     expect(hookMocks.runner.runBeforeDispatch).toHaveBeenCalled();
     expect(dispatcher.sendFinalReply).toHaveBeenCalledWith({ text: "model reply" });
   });
+
+  it("forwards the inbound messageId on the event when available", async () => {
+    hookMocks.runner.runBeforeDispatch.mockResolvedValue({ handled: false });
+    const dispatcher = createDispatcher();
+    await dispatchReplyFromConfig({
+      ctx: createHookCtx({ MessageSidFull: "msg-42" }),
+      cfg: emptyConfig,
+      dispatcher,
+      replyResolver: async () => ({ text: "model reply" }),
+    });
+    expect(hookMocks.runner.runBeforeDispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: "msg-42" }),
+      expect.anything(),
+    );
+  });
+
+  it("leaves messageId undefined when no MessageSid* fields are set", async () => {
+    hookMocks.runner.runBeforeDispatch.mockResolvedValue({ handled: false });
+    const dispatcher = createDispatcher();
+    await dispatchReplyFromConfig({
+      ctx: createHookCtx(),
+      cfg: emptyConfig,
+      dispatcher,
+      replyResolver: async () => ({ text: "model reply" }),
+    });
+    expect(hookMocks.runner.runBeforeDispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: undefined }),
+      expect.anything(),
+    );
+  });
 });
 
 describe("sendPolicy deny — suppress delivery, not processing (#53328)", () => {

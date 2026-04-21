@@ -228,6 +228,7 @@ export type PluginHookBeforeDispatchEvent = {
   senderId?: string;
   isGroup?: boolean;
   timestamp?: number;
+  messageId?: string;
 };
 
 export type PluginHookBeforeDispatchContext = {
