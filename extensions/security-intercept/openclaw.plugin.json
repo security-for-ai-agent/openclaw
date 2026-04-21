@@ -1,0 +1,60 @@
+{
+  "id": "security-intercept",
+  "enabledByDefault": false,
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "mode": {
+        "type": "string",
+        "enum": ["shadow", "enforce"],
+        "default": "shadow",
+        "description": "shadow = detect and audit only; enforce = apply intercept actions"
+      },
+      "threats": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "promptInjection": { "type": "boolean", "default": true },
+          "shellInjection": { "type": "boolean", "default": true }
+        }
+      },
+      "patterns": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "promptInjection": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "shellInjection": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "uiHints": {
+    "mode": {
+      "label": "Enforcement mode",
+      "help": "shadow = detect + audit only (no intercept). enforce = replace tool result with [BLOCKED], inject LLM security alert, block follow-on tool calls in the same outer turn."
+    },
+    "threats.promptInjection": {
+      "label": "Detect prompt injection",
+      "help": "Match tool results that try to rewrite the agent's instructions (ignore previous instructions / you are now / disregard / new persona)."
+    },
+    "threats.shellInjection": {
+      "label": "Detect shell injection",
+      "help": "Match tool results containing destructive shell commands (rm -rf, curl|bash, DROP TABLE, mkfs, fork bomb)."
+    },
+    "patterns.promptInjection": {
+      "label": "Custom prompt-injection patterns",
+      "help": "Extra regex patterns appended to the built-in set. Invalid regexes are skipped with a warning."
+    },
+    "patterns.shellInjection": {
+      "label": "Custom shell-injection patterns",
+      "help": "Extra regex patterns appended to the built-in set. Invalid regexes are skipped with a warning."
+    }
+  }
+}
