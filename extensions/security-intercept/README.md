@@ -27,10 +27,21 @@ whether it came from an LLM or from a memory-retrieval bypass):
 6. **Cancel** — if the reply contains a private-key PEM block, cancel the
    whole message and substitute a short security notice.
 
+**Case 2 — prompt-modify** (tool result has risky-but-usable content):
+
+7. **Annotate** — `tool_result_persist` prepends
+   `[security-intercept: <class> — see security directive …]` but KEEPS the
+   original content so the LLM can reason about it.
+8. **Guide** — `before_prompt_build` injects a class-specific `SECURITY NOTE`
+   directive (credential-leak → don't reproduce verbatim; scope-expansion →
+   role unchanged; oversized-result → summarize, don't quote).
+9. **Approve** — for `scope-expansion`, the next tool call in the run is gated
+   behind a human approval prompt rather than hard-blocked.
+
 **Shared:**
 
-7. **Audit** — contribute findings to `openclaw security audit` and
-   `openclaw doctor`.
+10. **Audit** — contribute findings to `openclaw security audit` and
+    `openclaw doctor`.
 
 See `REQUIREMENTS.md` for line-by-line requirement → code traceability.
 
@@ -56,17 +67,26 @@ openclaw gateway restart
             "promptInjection": true,
             "shellInjection": true,
             "credentialLeak": true,
-            "piiExposure": true
+            "piiExposure": true,
+            "credentialLeakTool": true,
+            "scopeExpansion": true,
+            "oversizedResult": true
           },
           "patterns": {
             "promptInjection": ["additional-regex-1", "additional-regex-2"],
             "shellInjection": [],
             "credentialLeak": [],
-            "piiExposure": []
+            "piiExposure": [],
+            "credentialLeakTool": [],
+            "scopeExpansion": []
           },
           "egress": {
             "action": "redact",
             "addNotice": true
+          },
+          "case2": {
+            "oversizedThreshold": 8000,
+            "approvalOnScopeExpansion": true
           }
         }
       }
@@ -98,9 +118,18 @@ openclaw security audit --deep
 
 ## Scope
 
-This plugin covers **Case 1a** (tool-result origin, `prompt-injection` /
-`shell-injection`) and **Case 1b** (outbound egress scan for `credential-leak`
-/ `pii-exposure` — catches the memory-retrieval bypass path). **Case 2**
-(`prompt-modify` for tool-origin `credential-leak` / `scope-expansion` /
-`oversized-result`) ships in the follow-on commit per the 2026-04-20 plan in
-`openclaw-security/discuss/group-discuss-1.md`.
+This plugin covers the full three-case set from
+`openclaw-security/discuss/plugin-design.md §0`:
+
+- **Case 1a** — tool-result origin, hard-intercept combo for
+  `prompt-injection` and `shell-injection`.
+- **Case 1b** — outbound egress scan at `message_sending` for
+  `credential-leak` / `pii-exposure`, covering the memory-retrieval bypass
+  path where no tool/LLM hook fires.
+- **Case 2** — prompt-modify combo for tool-origin `credential-leak`,
+  `scope-expansion`, and `oversized-result`: content preserved and annotated,
+  LLM guided, `scope-expansion` gates the next tool call behind
+  `requireApproval`.
+
+Case precedence: when a single run has both Case 1a and Case 2 detections,
+Case 1a wins — the run's strictest contract is what the user sees.

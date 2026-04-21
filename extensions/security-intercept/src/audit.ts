@@ -92,6 +92,35 @@ export const securityInterceptAuditCollector: OpenClawPluginSecurityAuditCollect
       remediation: `Set plugins.entries.${PLUGIN_ID}.config.threats.piiExposure to true.`,
     });
   }
+  if (entry.threats?.credentialLeakTool === false) {
+    findings.push({
+      checkId: `${PLUGIN_ID}.threats.credential-leak-tool-off`,
+      severity: "warn",
+      title: "credential-leak tool-origin detection disabled (Case 2)",
+      detail: "Tool returns carrying credential material will not be annotated for LLM guidance.",
+      remediation: `Set plugins.entries.${PLUGIN_ID}.config.threats.credentialLeakTool to true.`,
+    });
+  }
+  if (entry.threats?.scopeExpansion === false) {
+    findings.push({
+      checkId: `${PLUGIN_ID}.threats.scope-expansion-off`,
+      severity: "warn",
+      title: "scope-expansion detection disabled (Case 2)",
+      detail:
+        "Tool returns attempting to expand agent scope/role will not be flagged and the next-tool approval gate will not fire.",
+      remediation: `Set plugins.entries.${PLUGIN_ID}.config.threats.scopeExpansion to true.`,
+    });
+  }
+  if (entry.case2?.approvalOnScopeExpansion === false) {
+    findings.push({
+      checkId: `${PLUGIN_ID}.case2.approval-off`,
+      severity: "info",
+      title: "scope-expansion approval gate disabled",
+      detail:
+        "After a scope-expansion detection, the next tool call proceeds without a user-approval prompt. This is a deliberate relaxation.",
+      remediation: `Set plugins.entries.${PLUGIN_ID}.config.case2.approvalOnScopeExpansion to true to restore the gate.`,
+    });
+  }
 
   if (ctx.env?.OPENCLAW_SECURITY_OFF === "1") {
     findings.push({

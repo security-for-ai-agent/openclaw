@@ -18,7 +18,10 @@
           "promptInjection": { "type": "boolean", "default": true },
           "shellInjection": { "type": "boolean", "default": true },
           "credentialLeak": { "type": "boolean", "default": true },
-          "piiExposure": { "type": "boolean", "default": true }
+          "piiExposure": { "type": "boolean", "default": true },
+          "credentialLeakTool": { "type": "boolean", "default": true },
+          "scopeExpansion": { "type": "boolean", "default": true },
+          "oversizedResult": { "type": "boolean", "default": true }
         }
       },
       "patterns": {
@@ -28,7 +31,26 @@
           "promptInjection": { "type": "array", "items": { "type": "string" } },
           "shellInjection": { "type": "array", "items": { "type": "string" } },
           "credentialLeak": { "type": "array", "items": { "type": "string" } },
-          "piiExposure": { "type": "array", "items": { "type": "string" } }
+          "piiExposure": { "type": "array", "items": { "type": "string" } },
+          "credentialLeakTool": { "type": "array", "items": { "type": "string" } },
+          "scopeExpansion": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "case2": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "oversizedThreshold": {
+            "type": "integer",
+            "minimum": 1024,
+            "default": 8000,
+            "description": "Characters above which a tool result is flagged oversized-result (Case 2)."
+          },
+          "approvalOnScopeExpansion": {
+            "type": "boolean",
+            "default": true,
+            "description": "When true, after a scope-expansion detection the next tool call requires explicit user approval instead of silently proceeding."
+          }
         }
       },
       "egress": {
@@ -71,6 +93,18 @@
       "label": "Detect PII on outbound (Case 1b)",
       "help": "Scan the outbound channel message for PII (US SSN, email, candidate credit-card digits)."
     },
+    "threats.credentialLeakTool": {
+      "label": "Detect credential leak in tool result (Case 2)",
+      "help": "Detect credential-shaped material in a tool's returned content. Case 2: keep the content visible to the LLM but inject a directive telling it not to reproduce the secret verbatim."
+    },
+    "threats.scopeExpansion": {
+      "label": "Detect scope expansion in tool result (Case 2)",
+      "help": "Detect phrases that attempt to grant the agent a new role or capability (\"you now have access to…\", \"additionally you are…\"). Case 2: inject a scope-unchanged directive; next tool call requires approval."
+    },
+    "threats.oversizedResult": {
+      "label": "Detect oversized tool result (Case 2)",
+      "help": "Flag tool results above the size threshold so the LLM is guided to summarize rather than quote verbatim."
+    },
     "patterns.promptInjection": {
       "label": "Custom prompt-injection patterns",
       "help": "Extra regex patterns appended to the built-in set. Invalid regexes are skipped with a warning."
@@ -94,6 +128,14 @@
     "egress.addNotice": {
       "label": "Add user-visible redaction notice",
       "help": "When true, the outbound reply includes a notice listing the redacted item kinds and counts."
+    },
+    "case2.oversizedThreshold": {
+      "label": "Oversized threshold (characters)",
+      "help": "Tool results longer than this (default 8000 chars) are flagged oversized-result, prompting the LLM to summarize."
+    },
+    "case2.approvalOnScopeExpansion": {
+      "label": "Require approval after scope-expansion",
+      "help": "When true, a scope-expansion detection gates the next tool call behind a human approval prompt instead of letting it proceed silently."
     }
   }
 }

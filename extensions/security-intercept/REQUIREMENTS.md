@@ -50,22 +50,28 @@ Every clause below cites the file and symbol that carries its implementation.
 ### 2.2 会话拦截 (Intercept the conversation)
 
 Interception is two layers — content layer (what the LLM sees) and control
-layer (what the LLM can do next).
+layer (what the LLM can do next) — and each layer branches by **Case** per
+`src/detectors.ts:caseOf()` so Case 1a is strict and Case 2 is guided.
 
-| Layer | Hook | Implementation | Effect |
-| --- | --- | --- | --- |
-| **Content** — replace tool result with `[BLOCKED]` placeholder | `tool_result_persist` (sync) | `src/hooks.ts` → the `tool_result_persist` registration; correlates via `toolCallId` since `PluginHookToolResultPersistContext` carries no `runId` | LLM never sees the original threat content. |
-| **Control** — block any further tool call in this outer turn | `before_tool_call` (async) | `src/hooks.ts` → the `before_tool_call` registration; checks `hasAnyDetection(ctx.runId)`; returns `{ block: true, blockReason }` | Prevents follow-up workaround attempts in the same `runId`. |
+| Layer | Case | Hook | Implementation | Effect |
+| --- | --- | --- | --- | --- |
+| **Content** | **1a** | `tool_result_persist` (sync) | `src/hooks.ts` → `rewriteCase1aContent()` — replace with `[BLOCKED]` placeholder | LLM never sees the original threat content. |
+| **Content** | **2** | `tool_result_persist` (sync) | `src/hooks.ts` → `rewriteCase2Content()` — prepend `[security-intercept: <class> — see security directive …]` and KEEP the original content | LLM sees the content plus a marker pointing at the directive it will receive next inner loop. |
+| **Control** | **1a** | `before_tool_call` (async) | Hard `{ block: true, blockReason }` on any Case 1a detection in the run | Prevents workaround attempts in the same `runId`. |
+| **Control** | **2 (`scope-expansion`)** | `before_tool_call` (async) | `{ requireApproval: { severity: "warning", timeoutBehavior: "deny" } }` | Next tool call is gated behind an explicit human approval prompt. Disabled via `case2.approvalOnScopeExpansion: false`. |
+| **Control** | **2 (`credential-leak`, `oversized-result`)** | `before_tool_call` (async) | Returns `undefined` | No gate — these classes are informational and don't warrant blocking downstream tools. |
+| **Precedence (mixed run)** | — | — | `src/hooks.ts` checks `state.detections.some(d => caseOf(d.class) === "1a")` first | Case 1a strictly supersedes Case 2 for the whole run: the run's strictest contract wins. |
 
 ### 2.3 修改模型提示词 (Modify the model prompt — Zhangpeng's open question)
 
 **Answer:** yes, `before_prompt_build` is the async-awaited hook that takes
 `prependContext` / `prependSystemContext` / `appendSystemContext` / `systemPrompt`.
 
-| Sub-requirement | Implementation |
-| --- | --- |
-| Inject a SECURITY ALERT directive into the next inner LLM loop (same `runId`, same outer turn) | `src/hooks.ts` → the `before_prompt_build` registration; reads `runId` from `PluginHookAgentContext` and returns a result with `prependContext` + `appendSystemContext` |
-| Instruct the LLM to tell the user, not retry, not reconstruct, not call more tools | Directive text inside the same registration (items 1–4 of the numbered list) |
+| Sub-requirement | Case | Implementation |
+| --- | --- | --- |
+| Inject a **SECURITY ALERT** directive (strict: notify user, no retry, no more tools) | **1a** | `src/hooks.ts` → `before_prompt_build` branch `hasCase1a === true` path; reads `runId` from `PluginHookAgentContext` and returns `prependContext` + `appendSystemContext` |
+| Inject a **SECURITY NOTE** directive per detected Case 2 class (keep content, guide reasoning, no reproduce / scope unchanged / summarize) | **2** | `src/hooks.ts` → `before_prompt_build` branch `hasCase1a === false` path; merges per-class directives from `src/directives.ts:directiveFor()`, de-duplicated by class so repeated hits don't blow the prompt |
+| Per-class directive text | **2** | `src/directives.ts` — one entry per class: `credential-leak` (don't reproduce verbatim), `scope-expansion` (role unchanged, next tool needs approval), `oversized-result` (summarize, don't quote) |
 
 ### 2.4 用户感知 (User perceives the interception, same outer turn)
 
@@ -128,17 +134,21 @@ independent of `runId` correlation — it pattern-matches the raw
   is used for that instead. Case 1b does NOT need this correlation because it
   pattern-matches the reply content directly — that is why it can run from
   `message_sending` even when no `runId`-keyed state exists.
-- **Case 2 (prompt-modify combo) is not implemented.** Deferred to a follow-on
-  PR per the same plan.
+- **Async-split classifier path is not implemented.** Case 2 detection today is
+  regex-only per the same sync-before-await constraint as Case 1a. An external
+  classifier (secret scanner, LLM-as-judge) would use the async-split pattern
+  documented in `hardening-combo-prompt-modify.md §7` — tool_result_persist
+  stashes a placeholder, before_prompt_build runs the async classifier. Still
+  deferred.
 
 ## 5. Test coverage mapping
 
 | Test file | Covers |
 | --- | --- |
-| `src/detectors.test.ts` | §2.1 — detector regex set, custom-pattern merging, invalid-regex safety, negative cases, first-match precedence |
+| `src/detectors.test.ts` | §2.1 — detector regex set (Case 1a + Case 2), `caseOf()` routing, custom-pattern merging, invalid-regex safety, negative cases, first-match precedence, ordering across cases |
 | `src/egress-scan.test.ts` | §2.4b — credential + PII egress rules, in-place redaction, critical-hit detection, multi-class simultaneous hits |
 | `src/run-context.test.ts` | §2.1 / §3 — shared-state lifecycle, `runId` isolation, `session_end` cleanup, tool-call-id indexing |
-| `index.test.ts` | §2.2 / §2.3 / §2.4 / §2.4b / §3 — full hook chain through a mock `api`: Case 1a enforce vs shadow vs kill-switch, Case 1b message_sending redact/cancel/notice paths, cross-run isolation, sync-before-await invariant, `session_end` cleanup |
+| `index.test.ts` | §2.2 / §2.3 / §2.4 / §2.4b / §3 — full hook chain through a mock `api`: Case 1a enforce vs shadow vs kill-switch, Case 1b message_sending redact/cancel/notice paths, Case 2 annotate-not-replace + per-class directive + scope-expansion approval gate + Case 1a precedence over Case 2 + oversized-threshold override, cross-run isolation, sync-before-await invariant, `session_end` cleanup |
 
 ## 6. Requirement coverage summary
 
@@ -153,6 +163,8 @@ independent of `runId` correlation — it pattern-matches the raw
 | 审计 | ✅ | `registerSecurityAuditCollector` → `src/audit.ts` |
 | 可降级 (shadow mode + kill switch) | ✅ | `src/hooks.ts`, `openclaw.plugin.json` |
 | 内存检索绕过 (Case 1b) | ✅ | `message_sending` → `src/hooks.ts`, `src/egress-scan.ts` |
+| 保留内容 + 指导模型 (Case 2 — credential-leak / scope-expansion / oversized-result) | ✅ | `src/hooks.ts` (per-case branches) + `src/directives.ts` (class-specific wording) + `src/detectors.ts` (`caseOf`, new class detectors) |
+| 人工审批 on scope-expansion (Case 2) | ✅ | `src/hooks.ts` `before_tool_call` `{ requireApproval: … }` branch |
 
 ## 7. Source material traceability
 
