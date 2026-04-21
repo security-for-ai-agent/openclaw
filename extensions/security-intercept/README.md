@@ -6,7 +6,8 @@ plugin design (`openclaw-security/discuss/plugin-design.md`).
 
 ## What it does
 
-For every tool result that lands in the agent's transcript:
+**Case 1a — tool-result origin** (every tool result that lands in the agent's
+transcript):
 
 1. **Detect** — synchronously match the result against regex patterns for
    prompt-injection and shell-injection (configurable).
@@ -17,7 +18,18 @@ For every tool result that lands in the agent's transcript:
    retry.
 4. **Intercept (control)** — block any follow-on tool call in the same
    `runId`.
-5. **Audit** — contribute findings to `openclaw security audit` and
+
+**Case 1b — outbound egress scan** (every channel-bound reply, regardless of
+whether it came from an LLM or from a memory-retrieval bypass):
+
+5. **Redact** — replace credential-shaped or PII substrings in the reply with
+   `[REDACTED:<kind>]` and append a security notice.
+6. **Cancel** — if the reply contains a private-key PEM block, cancel the
+   whole message and substitute a short security notice.
+
+**Shared:**
+
+7. **Audit** — contribute findings to `openclaw security audit` and
    `openclaw doctor`.
 
 See `REQUIREMENTS.md` for line-by-line requirement → code traceability.
@@ -42,11 +54,19 @@ openclaw gateway restart
           "mode": "enforce",
           "threats": {
             "promptInjection": true,
-            "shellInjection": true
+            "shellInjection": true,
+            "credentialLeak": true,
+            "piiExposure": true
           },
           "patterns": {
             "promptInjection": ["additional-regex-1", "additional-regex-2"],
-            "shellInjection": []
+            "shellInjection": [],
+            "credentialLeak": [],
+            "piiExposure": []
+          },
+          "egress": {
+            "action": "redact",
+            "addNotice": true
           }
         }
       }
@@ -78,8 +98,9 @@ openclaw security audit --deep
 
 ## Scope
 
-This PR covers **Case 1a** — tool-result origin, `prompt-injection` and
-`shell-injection` threats. Case 1b (memory-retrieval bypass) and Case 2
-(prompt-modify for `credential-leak` / `scope-expansion`) ship in follow-on
-PRs per the 2026-04-20 plan in
+This plugin covers **Case 1a** (tool-result origin, `prompt-injection` /
+`shell-injection`) and **Case 1b** (outbound egress scan for `credential-leak`
+/ `pii-exposure` — catches the memory-retrieval bypass path). **Case 2**
+(`prompt-modify` for tool-origin `credential-leak` / `scope-expansion` /
+`oversized-result`) ships in the follow-on commit per the 2026-04-20 plan in
 `openclaw-security/discuss/group-discuss-1.md`.

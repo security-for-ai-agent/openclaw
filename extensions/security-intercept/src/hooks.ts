@@ -16,6 +16,12 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 
 import { compileDetectors, detect, type CompiledDetectors, type Detection } from "./detectors.js";
 import {
+  compileEgressRules,
+  scanEgress,
+  type CompiledEgressRules,
+  type EgressRulesConfig,
+} from "./egress-scan.js";
+import {
   dropRun,
   dropSession,
   ensureRunState,
@@ -32,10 +38,20 @@ export type PluginConfig = {
   threats?: {
     promptInjection?: boolean;
     shellInjection?: boolean;
+    credentialLeak?: boolean;
+    piiExposure?: boolean;
   };
   patterns?: {
     promptInjection?: string[];
     shellInjection?: string[];
+    credentialLeak?: string[];
+    piiExposure?: string[];
+  };
+  egress?: {
+    /** `redact` (default) replaces matched substrings; `cancel` blocks the whole message on any match. */
+    action?: "redact" | "cancel";
+    /** Prepend / append a user-visible notice describing redactions (default: true). */
+    addNotice?: boolean;
   };
 };
 
@@ -84,7 +100,19 @@ export function registerSecurityInterceptHooks(
       },
     );
   };
+  const buildEgressRules = (): CompiledEgressRules => {
+    const cfg = configGetter() ?? {};
+    const rules: EgressRulesConfig = {
+      enableCredential: cfg.threats?.credentialLeak !== false,
+      enablePii: cfg.threats?.piiExposure !== false,
+      extraCredentialPatterns: cfg.patterns?.credentialLeak,
+      extraPiiPatterns: cfg.patterns?.piiExposure,
+    };
+    return compileEgressRules(rules);
+  };
   const mode = (): PluginMode => configGetter()?.mode ?? "shadow";
+  const egressAction = (): "redact" | "cancel" => configGetter()?.egress?.action ?? "redact";
+  const egressAddNotice = (): boolean => configGetter()?.egress?.addNotice !== false;
 
   // ── Hook 1: after_tool_call ─────────────────────────────────────────────
   // Sync-detect before first await. Flag visible to tool_result_persist same tick.
@@ -208,7 +236,53 @@ export function registerSecurityInterceptHooks(
     return undefined;
   });
 
-  // ── Hook 6: session_end ─────────────────────────────────────────────────
+  // ── Hook 6: message_sending (Case 1b — egress intercept) ───────────────
+  // Scan the outbound channel reply for credential / PII patterns.
+  // Handles the memory-retrieval bypass where no tool/LLM hook fired, so
+  // runId correlation is not possible. The scan stands on its own pattern
+  // match against the raw `event.content`.
+  //
+  // Actions:
+  //   - `criticalHit` (private-key PEM etc.) → cancel the message entirely,
+  //     replacing with a short security notice on channels that accept it.
+  //   - any soft hit → replace the matched substring with [REDACTED:<kind>]
+  //     and optionally prepend a user-visible notice.
+  api.on("message_sending", async (event) => {
+    if (killSwitchActive() || mode() === "shadow") return undefined;
+
+    const content = event.content ?? "";
+    if (!content) return undefined;
+
+    const rules = buildEgressRules();
+    const scan = scanEgress(content, rules);
+    if (scan.matches.length === 0) return undefined;
+
+    const kinds = scan.matches.map((m) => `${m.kind}×${m.count}`).join(", ");
+    api.logger.warn(
+      `[security-intercept] egress match on channel="${event.to}" kinds=${kinds} critical=${scan.criticalHit}`,
+    );
+
+    if (scan.criticalHit || egressAction() === "cancel") {
+      return {
+        content:
+          `[security-intercept: message cancelled] An outbound reply was cancelled because it contained ` +
+          `sensitive material (${kinds}). The original content was not delivered. Please rephrase without including secrets.`,
+        // Some channels honor `cancel: true` as a terminal decision; by returning
+        // new content + cancel we both short-circuit delivery and leave a trail.
+        cancel: true,
+      };
+    }
+
+    const notice = egressAddNotice()
+      ? `\n\n⚠️ Security notice: ${scan.matches.reduce((n, m) => n + m.count, 0)} ` +
+        `sensitive item${scan.matches.length > 1 ? "s" : ""} (${kinds}) ` +
+        `were redacted from this reply by security-intercept.`
+      : "";
+
+    return { content: scan.redactedContent + notice };
+  });
+
+  // ── Hook 7: session_end ─────────────────────────────────────────────────
   // Drop everything keyed off the ended session.
   api.on("session_end", async (event, ctx) => {
     dropSession(ctx.sessionKey ?? event.sessionKey, ctx.sessionId ?? event.sessionId);

@@ -73,6 +73,25 @@ export const securityInterceptAuditCollector: OpenClawPluginSecurityAuditCollect
       remediation: `Set plugins.entries.${PLUGIN_ID}.config.threats.shellInjection to true.`,
     });
   }
+  if (entry.threats?.credentialLeak === false) {
+    findings.push({
+      checkId: `${PLUGIN_ID}.threats.credential-leak-off`,
+      severity: "warn",
+      title: "credential-leak egress scan disabled",
+      detail:
+        "Outbound channel replies are not scanned for credential-shaped substrings. The memory-retrieval bypass path is unmonitored.",
+      remediation: `Set plugins.entries.${PLUGIN_ID}.config.threats.credentialLeak to true.`,
+    });
+  }
+  if (entry.threats?.piiExposure === false) {
+    findings.push({
+      checkId: `${PLUGIN_ID}.threats.pii-exposure-off`,
+      severity: "warn",
+      title: "pii-exposure egress scan disabled",
+      detail: "Outbound channel replies are not scanned for PII substrings.",
+      remediation: `Set plugins.entries.${PLUGIN_ID}.config.threats.piiExposure to true.`,
+    });
+  }
 
   if (ctx.env?.OPENCLAW_SECURITY_OFF === "1") {
     findings.push({

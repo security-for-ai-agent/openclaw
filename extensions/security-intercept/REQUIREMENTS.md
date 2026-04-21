@@ -69,13 +69,34 @@ layer (what the LLM can do next).
 
 ### 2.4 用户感知 (User perceives the interception, same outer turn)
 
-Three delivery paths, all guaranteed in the current outer turn:
+Four delivery paths, all guaranteed in the current outer turn:
 
 | Path | Mechanism |
 | --- | --- |
 | **LLM-driven text reply** | `before_prompt_build` tells the LLM to announce the block. `before_tool_call` blocks any follow-on tool call, forcing the LLM into natural-language response in the same outer turn. |
 | **Transcript marker for the user-visible channel that renders tool results** | `tool_result_persist` replacement inserts a `[BLOCKED by security-intercept] …` placeholder which replaces the raw tool output in the session. |
+| **Outbound reply redaction / cancel (Case 1b)** | `message_sending` scans the final channel-bound reply and either (a) replaces matched substrings with `[REDACTED:<kind>]` + an inline security notice, or (b) cancels the whole message and substitutes a short notice when `criticalHit` (private-key PEM) or `egress.action=cancel` is set. |
 | **Silent-LLM safety signal** | `before_agent_reply` (v1: observational — logs a warning if the reply body does not mention the block; v2 follow-on: synthesize a reply-tail; see §4 below). |
+
+### 2.4b Memory-retrieval bypass coverage (Case 1b)
+
+Per `openclaw-security/discuss/notes-aemi.md`, a user can install the plugin
+*after* storing sensitive data, then have that data surfaced via a memory
+retrieval that does not hit any tool or LLM hook. `message_sending` is the
+only chokepoint before the channel delivers the reply. The Case 1b path is
+independent of `runId` correlation — it pattern-matches the raw
+`event.content` against egress rules compiled by
+`src/egress-scan.ts:compileEgressRules()`.
+
+| Sub-requirement | Implementation |
+| --- | --- |
+| Detect credential-shape substrings in outbound content | `src/egress-scan.ts` → `DEFAULT_CREDENTIAL_RULES` (AWS, OpenAI-like, GitHub PAT, bearer, password-assignment, PEM private key) |
+| Detect PII in outbound content | `src/egress-scan.ts` → `DEFAULT_PII_RULES` (US SSN, email, candidate credit-card digits) |
+| Redact matched substrings in place | `src/egress-scan.ts` → `scanEgress()` with `severity: "soft"` rules; `src/hooks.ts` message_sending returns `{ content: redacted + notice }` |
+| Cancel the whole message on a "hard" hit (private-key PEM) | `src/egress-scan.ts` reports `criticalHit: true`; hook returns `{ cancel: true, content: "[security-intercept: message cancelled] …" }` |
+| Per-class enable / disable and custom extra patterns | `openclaw.plugin.json` → `threats.credentialLeak`, `threats.piiExposure`, `patterns.credentialLeak`, `patterns.piiExposure`; wired through `compileEgressRules()` |
+| Operator choice between per-substring redaction and whole-message cancel | `openclaw.plugin.json` → `egress.action` (`redact` default, `cancel` alternative) |
+| User-visible notice on soft redaction | `openclaw.plugin.json` → `egress.addNotice` (default true); hook appends the notice after the redacted body |
 
 ### 2.5 审计 (Audit / operator visibility)
 
@@ -100,16 +121,13 @@ Three delivery paths, all guaranteed in the current outer turn:
   the LLM's reply body does not mention the block, but does not synthesize a
   reply-tail directly. A v2 iteration can use `ReplyPayload` synthesis to
   guarantee user-visible notification even when the LLM stays silent.
-- **`message_sending` is not used as a safety net.** `PluginHookMessageContext`
-  (channelId / accountId / conversationId) carries no `runId` or `sessionKey`,
-  so we cannot correlate an outbound channel reply back to a run's detections.
-  `before_agent_reply` (which does carry `runId`) is used instead. Resolving
-  this properly is part of the memory-retrieval-bypass work item Rugang owes
-  Zhangpeng (see `openclaw-security/discuss/notes-aemi.md` action item).
-- **Case 1b (memory-retrieval bypass) is not implemented.** The scope of this
-  PR is Case 1a only, per Rugang's 2026-04-20 00:35 plan in
-  `openclaw-security/discuss/group-discuss-1.md`. Case 1b ships in a later PR
-  once the output-point interception question is answered.
+- **`message_sending` does not correlate to `runId` for Case 1a's safety-net role.**
+  `PluginHookMessageContext` (channelId / accountId / conversationId) carries no
+  `runId` or `sessionKey`, so a Case 1a detection cannot be matched back to the
+  outbound reply it produced. `before_agent_reply` (which does carry `runId`)
+  is used for that instead. Case 1b does NOT need this correlation because it
+  pattern-matches the reply content directly — that is why it can run from
+  `message_sending` even when no `runId`-keyed state exists.
 - **Case 2 (prompt-modify combo) is not implemented.** Deferred to a follow-on
   PR per the same plan.
 
@@ -118,8 +136,9 @@ Three delivery paths, all guaranteed in the current outer turn:
 | Test file | Covers |
 | --- | --- |
 | `src/detectors.test.ts` | §2.1 — detector regex set, custom-pattern merging, invalid-regex safety, negative cases, first-match precedence |
+| `src/egress-scan.test.ts` | §2.4b — credential + PII egress rules, in-place redaction, critical-hit detection, multi-class simultaneous hits |
 | `src/run-context.test.ts` | §2.1 / §3 — shared-state lifecycle, `runId` isolation, `session_end` cleanup, tool-call-id indexing |
-| `index.test.ts` | §2.2 / §2.3 / §2.4 / §3 — full hook chain through a mock `api`: enforce vs shadow vs kill-switch, cross-run isolation, sync-before-await invariant, `session_end` cleanup |
+| `index.test.ts` | §2.2 / §2.3 / §2.4 / §2.4b / §3 — full hook chain through a mock `api`: Case 1a enforce vs shadow vs kill-switch, Case 1b message_sending redact/cancel/notice paths, cross-run isolation, sync-before-await invariant, `session_end` cleanup |
 
 ## 6. Requirement coverage summary
 
@@ -133,6 +152,7 @@ Three delivery paths, all guaranteed in the current outer turn:
 | 用户感知 (safety net when LLM stays silent) | Partial — v1 observational | `before_agent_reply` → `src/hooks.ts` |
 | 审计 | ✅ | `registerSecurityAuditCollector` → `src/audit.ts` |
 | 可降级 (shadow mode + kill switch) | ✅ | `src/hooks.ts`, `openclaw.plugin.json` |
+| 内存检索绕过 (Case 1b) | ✅ | `message_sending` → `src/hooks.ts`, `src/egress-scan.ts` |
 
 ## 7. Source material traceability
 

@@ -16,20 +16,35 @@
         "additionalProperties": false,
         "properties": {
           "promptInjection": { "type": "boolean", "default": true },
-          "shellInjection": { "type": "boolean", "default": true }
+          "shellInjection": { "type": "boolean", "default": true },
+          "credentialLeak": { "type": "boolean", "default": true },
+          "piiExposure": { "type": "boolean", "default": true }
         }
       },
       "patterns": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "promptInjection": {
-            "type": "array",
-            "items": { "type": "string" }
+          "promptInjection": { "type": "array", "items": { "type": "string" } },
+          "shellInjection": { "type": "array", "items": { "type": "string" } },
+          "credentialLeak": { "type": "array", "items": { "type": "string" } },
+          "piiExposure": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "egress": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["redact", "cancel"],
+            "default": "redact",
+            "description": "redact = replace matched substrings in place (default). cancel = block the whole outbound message on any soft match."
           },
-          "shellInjection": {
-            "type": "array",
-            "items": { "type": "string" }
+          "addNotice": {
+            "type": "boolean",
+            "default": true,
+            "description": "Append a user-visible notice to the outbound reply when redactions occur."
           }
         }
       }
@@ -48,6 +63,14 @@
       "label": "Detect shell injection",
       "help": "Match tool results containing destructive shell commands (rm -rf, curl|bash, DROP TABLE, mkfs, fork bomb)."
     },
+    "threats.credentialLeak": {
+      "label": "Detect credential leak on outbound (Case 1b)",
+      "help": "Scan the final outbound channel message for credential-shaped substrings (AWS/OpenAI/GitHub keys, PEM private keys, bearer tokens, password assignments). Catches memory-retrieval and cached-reply bypass paths."
+    },
+    "threats.piiExposure": {
+      "label": "Detect PII on outbound (Case 1b)",
+      "help": "Scan the outbound channel message for PII (US SSN, email, candidate credit-card digits)."
+    },
     "patterns.promptInjection": {
       "label": "Custom prompt-injection patterns",
       "help": "Extra regex patterns appended to the built-in set. Invalid regexes are skipped with a warning."
@@ -55,6 +78,22 @@
     "patterns.shellInjection": {
       "label": "Custom shell-injection patterns",
       "help": "Extra regex patterns appended to the built-in set. Invalid regexes are skipped with a warning."
+    },
+    "patterns.credentialLeak": {
+      "label": "Custom credential-leak patterns (egress)",
+      "help": "Extra regex patterns for credential-shape detection at outbound. Applied to channel reply content at message_sending."
+    },
+    "patterns.piiExposure": {
+      "label": "Custom PII patterns (egress)",
+      "help": "Extra regex patterns for PII detection at outbound."
+    },
+    "egress.action": {
+      "label": "Egress action (Case 1b)",
+      "help": "redact = replace matched substrings in place (recommended default). cancel = block the entire outbound message on any match."
+    },
+    "egress.addNotice": {
+      "label": "Add user-visible redaction notice",
+      "help": "When true, the outbound reply includes a notice listing the redacted item kinds and counts."
     }
   }
 }

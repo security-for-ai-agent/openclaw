@@ -257,6 +257,98 @@ describe("security-intercept — kill switch", () => {
   });
 });
 
+describe("security-intercept — Case 1b (egress intercept via message_sending)", () => {
+  it("redacts credential material in the outbound reply", async () => {
+    const { hooks } = createMockApi({ mode: "enforce" });
+    const result = (await hooks.message_sending(
+      {
+        to: "discord:channel:1",
+        content: "Your key is AKIAABCDEFGHIJKLMNOP. Guard it.",
+      },
+      { channelId: "discord:channel:1" },
+    )) as { content?: string; cancel?: boolean } | undefined;
+    expect(result?.content).toMatch(/\[REDACTED:aws-access-key\]/);
+    expect(result?.content).not.toContain("AKIAABCDEFGHIJKLMNOP");
+    expect(result?.cancel).not.toBe(true);
+  });
+
+  it("cancels the whole message on a private-key PEM hit", async () => {
+    const { hooks } = createMockApi({ mode: "enforce" });
+    const pem =
+      "-----BEGIN RSA PRIVATE KEY-----\nBODY\n-----END RSA PRIVATE KEY-----";
+    const result = (await hooks.message_sending(
+      { to: "slack:C1", content: pem },
+      { channelId: "slack:C1" },
+    )) as { content?: string; cancel?: boolean } | undefined;
+    expect(result?.cancel).toBe(true);
+    expect(result?.content).toMatch(/message cancelled/);
+    expect(result?.content).not.toContain("BODY");
+  });
+
+  it("redacts PII substrings but leaves the rest of the reply readable", async () => {
+    const { hooks } = createMockApi({ mode: "enforce" });
+    const result = (await hooks.message_sending(
+      { to: "telegram:42", content: "Contact user: alice@example.com (SSN 123-45-6789)." },
+      { channelId: "telegram:42" },
+    )) as { content?: string } | undefined;
+    expect(result?.content).toMatch(/\[REDACTED:email\]/);
+    expect(result?.content).toMatch(/\[REDACTED:us-ssn\]/);
+    expect(result?.content).toMatch(/Contact user:/);
+  });
+
+  it("does not touch benign outbound content", async () => {
+    const { hooks } = createMockApi({ mode: "enforce" });
+    const result = await hooks.message_sending(
+      { to: "cli", content: "Meeting notes: discussed roadmap, everyone on board." },
+      { channelId: "cli" },
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it("respects egress.action=cancel configuration (cancels on any soft hit)", async () => {
+    const { hooks } = createMockApi({ mode: "enforce", egress: { action: "cancel" } });
+    const result = (await hooks.message_sending(
+      { to: "web", content: "token=sk-abcdefghijklmnopqrstuvwxyzABCDEFG1234567890" },
+      { channelId: "web" },
+    )) as { cancel?: boolean } | undefined;
+    expect(result?.cancel).toBe(true);
+  });
+
+  it("omits the redaction notice when egress.addNotice=false", async () => {
+    const { hooks } = createMockApi({
+      mode: "enforce",
+      egress: { action: "redact", addNotice: false },
+    });
+    const result = (await hooks.message_sending(
+      { to: "cli", content: "Your SSN: 123-45-6789." },
+      { channelId: "cli" },
+    )) as { content?: string } | undefined;
+    expect(result?.content).toMatch(/\[REDACTED:us-ssn\]/);
+    expect(result?.content).not.toMatch(/Security notice/);
+  });
+
+  it("no-ops in shadow mode", async () => {
+    const { hooks } = createMockApi({ mode: "shadow" });
+    const result = await hooks.message_sending(
+      { to: "cli", content: "Key: AKIAABCDEFGHIJKLMNOP" },
+      { channelId: "cli" },
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it("disables the scan when threats.credentialLeak=false and threats.piiExposure=false", async () => {
+    const { hooks } = createMockApi({
+      mode: "enforce",
+      threats: { credentialLeak: false, piiExposure: false },
+    });
+    const result = await hooks.message_sending(
+      { to: "cli", content: "AKIAABCDEFGHIJKLMNOP / alice@example.com / 123-45-6789" },
+      { channelId: "cli" },
+    );
+    expect(result).toBeUndefined();
+  });
+});
+
 describe("security-intercept — sync-before-await invariant", () => {
   it("tool_result_persist sees the detection set by after_tool_call within the same tick", async () => {
     const { hooks } = createMockApi({ mode: "enforce" });
