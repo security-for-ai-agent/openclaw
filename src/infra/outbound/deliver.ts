@@ -26,6 +26,7 @@ import { createSubsystemLogger } from "../../logging/subsystem.js";
 import type { OutboundMediaAccess } from "../../media/load-options.js";
 import { resolveAgentScopedOutboundMediaAccess } from "../../media/read-capability.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
+import { getContentScanner } from "../../security/content-scanner/index.js";
 import { formatErrorMessage } from "../errors.js";
 import { throwIfAborted } from "./abort.js";
 import type { OutboundDeliveryResult } from "./deliver-types.js";
@@ -428,22 +429,50 @@ async function applyMessageSendingHook(params: {
   payload: ReplyPayload;
   payloadSummary: NormalizedOutboundPayload;
 }> {
+  // Core content scanner (Case 1b) runs on every outbound — even when plugin
+  // hooks are disabled — because memory-retrieval / cached-reply paths skip
+  // every agent-side hook and `message_sending` is the only chokepoint.
+  let workingPayload = params.payload;
+  let workingSummary = params.payloadSummary;
+  const scanner = getContentScanner();
+  if (scanner.isActive()) {
+    try {
+      const scannerOut = await scanner.onMessageSending({
+        to: params.to,
+        content: workingSummary.text,
+      });
+      if (scannerOut?.cancel) {
+        return {
+          cancelled: true,
+          payload: workingPayload,
+          payloadSummary: workingSummary,
+        };
+      }
+      if (scannerOut?.content != null && scannerOut.content !== workingSummary.text) {
+        workingPayload = { ...workingPayload, text: scannerOut.content };
+        workingSummary = { ...workingSummary, text: scannerOut.content };
+      }
+    } catch (err) {
+      log.warn(`content-scanner message_sending failed: ${formatErrorMessage(err)}`);
+    }
+  }
+
   if (!params.enabled) {
     return {
       cancelled: false,
-      payload: params.payload,
-      payloadSummary: params.payloadSummary,
+      payload: workingPayload,
+      payloadSummary: workingSummary,
     };
   }
   try {
     const sendingResult = await params.hookRunner!.runMessageSending(
       {
         to: params.to,
-        content: params.payloadSummary.text,
+        content: workingSummary.text,
         metadata: {
           channel: params.channel,
           accountId: params.accountId,
-          mediaUrls: params.payloadSummary.mediaUrls,
+          mediaUrls: workingSummary.mediaUrls,
         },
       },
       {
@@ -454,26 +483,26 @@ async function applyMessageSendingHook(params: {
     if (sendingResult?.cancel) {
       return {
         cancelled: true,
-        payload: params.payload,
-        payloadSummary: params.payloadSummary,
+        payload: workingPayload,
+        payloadSummary: workingSummary,
       };
     }
     if (sendingResult?.content == null) {
       return {
         cancelled: false,
-        payload: params.payload,
-        payloadSummary: params.payloadSummary,
+        payload: workingPayload,
+        payloadSummary: workingSummary,
       };
     }
     const payload = {
-      ...params.payload,
+      ...workingPayload,
       text: sendingResult.content,
     };
     return {
       cancelled: false,
       payload,
       payloadSummary: {
-        ...params.payloadSummary,
+        ...workingSummary,
         text: sendingResult.content,
       },
     };
@@ -481,8 +510,8 @@ async function applyMessageSendingHook(params: {
     // Don't block delivery on hook failure.
     return {
       cancelled: false,
-      payload: params.payload,
-      payloadSummary: params.payloadSummary,
+      payload: workingPayload,
+      payloadSummary: workingSummary,
     };
   }
 }

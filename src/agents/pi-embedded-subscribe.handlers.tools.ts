@@ -14,6 +14,7 @@ import {
 } from "../infra/agent-events.js";
 import type { ExecApprovalDecision } from "../infra/exec-approvals.js";
 import type { PluginHookAfterToolCallEvent } from "../plugins/types.js";
+import { getContentScanner } from "../security/content-scanner/index.js";
 import { normalizeOptionalLowercaseString, readStringValue } from "../shared/string-coerce.js";
 import type { ApplyPatchSummary } from "./apply-patch.js";
 import type { ExecToolDetails } from "./bash-tools.exec-types.js";
@@ -793,6 +794,20 @@ export async function handleToolExecutionEnd(
   const result = evt.result;
   const isToolError = isError || isToolResultError(result);
   const sanitizedResult = sanitizeToolResult(result);
+  // Core content scanner — sync detection at the same tick as after_tool_call
+  // so tool_result_persist sees the flag in the same pipeline window.
+  try {
+    getContentScanner().onAfterToolCall({
+      toolName,
+      result: sanitizedResult,
+      runId,
+      toolCallId,
+      sessionKey: ctx.params.sessionKey,
+      sessionId: ctx.params.sessionId,
+    });
+  } catch (err) {
+    ctx.log.warn(`content-scanner after_tool_call failed: tool=${toolName} error=${String(err)}`);
+  }
   const toolStartKey = buildToolStartKey(runId, toolCallId);
   const startData = toolStartData.get(toolStartKey);
   toolStartData.delete(toolStartKey);

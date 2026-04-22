@@ -4,6 +4,7 @@ import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import { copyPluginToolMeta } from "../plugins/tools.js";
 import { PluginApprovalResolutions, type PluginApprovalResolution } from "../plugins/types.js";
+import { getContentScanner } from "../security/content-scanner/index.js";
 import { createLazyRuntimeSurface } from "../shared/lazy-runtime.js";
 import { isPlainObject } from "../utils.js";
 import { copyChannelAgentToolMeta } from "./channel-tools.js";
@@ -183,6 +184,35 @@ export async function runBeforeToolCallHook(args: {
     }
 
     recordToolCall(sessionState, toolName, params, args.toolCallId, args.ctx.loopDetection);
+  }
+
+  // Core content scanner runs first — it gates the whole tool call before the
+  // plugin hook runner gets a say. A scanner `block` or `requireApproval` is
+  // terminal; if the scanner passes, plugin hooks still run.
+  const scanner = getContentScanner();
+  if (scanner.isActive()) {
+    try {
+      const scannerDecision = await scanner.onBeforeToolCall({
+        toolName,
+        runId: args.ctx?.runId,
+        params: isPlainObject(params) ? params : {},
+      });
+      if (scannerDecision && "block" in scannerDecision && scannerDecision.block) {
+        return {
+          blocked: true,
+          reason: scannerDecision.blockReason,
+        };
+      }
+      if (scannerDecision && "requireApproval" in scannerDecision) {
+        const approval = scannerDecision.requireApproval;
+        return {
+          blocked: true,
+          reason: `${approval.title} — ${approval.description.slice(0, 200)}`,
+        };
+      }
+    } catch (err) {
+      log.warn(`content-scanner before_tool_call failed: tool=${toolName} error=${String(err)}`);
+    }
   }
 
   const hookRunner = getGlobalHookRunner();
