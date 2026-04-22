@@ -153,14 +153,20 @@ function formatCase2Annotation(detection: Detection): string {
 
 function rewriteCase1aContent(originalContent: unknown, detection: Detection): unknown {
   const blocked = formatBlockedMessageContent(detection);
-  if (typeof originalContent === "string") return blocked;
-  if (Array.isArray(originalContent)) return [{ type: "text", text: blocked }];
+  if (typeof originalContent === "string") {
+    return blocked;
+  }
+  if (Array.isArray(originalContent)) {
+    return [{ type: "text", text: blocked }];
+  }
   return blocked;
 }
 
 function rewriteCase2Content(originalContent: unknown, detection: Detection): unknown {
   const annotation = formatCase2Annotation(detection);
-  if (typeof originalContent === "string") return annotation + originalContent;
+  if (typeof originalContent === "string") {
+    return annotation + originalContent;
+  }
   if (Array.isArray(originalContent)) {
     return [{ type: "text", text: annotation }, ...originalContent];
   }
@@ -258,12 +264,18 @@ export class ContentScanner {
    * visible to `onToolResultPersist` in the same pipeline tick.
    */
   onAfterToolCall(input: ScannerAfterToolCallInput): void {
-    if (!this.isActive()) return;
-    if (!input.runId) return;
+    if (!this.isActive()) {
+      return;
+    }
+    if (!input.runId) {
+      return;
+    }
 
     this.runs.ensureRun(input.runId, input.sessionKey, input.sessionId);
     const hit = detect(input.toolName, input.result, this.detectors);
-    if (!hit) return;
+    if (!hit) {
+      return;
+    }
 
     const detection: Detection = {
       ...hit,
@@ -281,10 +293,14 @@ export class ContentScanner {
    * the original message through.
    */
   onToolResultPersist(input: ScannerToolResultPersistInput): ScannerToolResultPersistResult | undefined {
-    if (!this.isEnforcing()) return undefined;
+    if (!this.isEnforcing()) {
+      return undefined;
+    }
 
     const detection = this.runs.getDetectionByToolCallId(input.toolCallId);
-    if (!detection) return undefined;
+    if (!detection) {
+      return undefined;
+    }
 
     const original = input.message as unknown as { content?: unknown } & Record<string, unknown>;
     const newContent =
@@ -307,14 +323,18 @@ export class ContentScanner {
   async onBeforePromptBuild(
     input: ScannerBeforePromptBuildInput,
   ): Promise<ScannerBeforePromptBuildResult | undefined> {
-    if (!this.isEnforcing()) return undefined;
+    if (!this.isEnforcing()) {
+      return undefined;
+    }
     const state = this.runs.getStateByRun(input.runId);
-    if (!state || state.detections.length === 0) return undefined;
+    if (!state || state.detections.length === 0) {
+      return undefined;
+    }
 
     const hasCase1a = state.detections.some((d) => caseOf(d.class) === "1a");
     if (hasCase1a) {
       const last1a =
-        [...state.detections].reverse().find((d) => caseOf(d.class) === "1a") ?? state.detections[0];
+        state.detections.toReversed().find((d) => caseOf(d.class) === "1a") ?? state.detections[0];
       return {
         prependContext:
           `SECURITY ALERT (content-scanner): The most recent tool result was blocked because it matched ` +
@@ -334,14 +354,22 @@ export class ContentScanner {
     const appendParts: string[] = [];
     const seen = new Set<ThreatClass>();
     for (const d of state.detections) {
-      if (seen.has(d.class)) continue;
+      if (seen.has(d.class)) {
+        continue;
+      }
       seen.add(d.class);
       const dir = directiveFor(d.class);
-      if (!dir) continue;
+      if (!dir) {
+        continue;
+      }
       prependParts.push(dir.prependContext);
-      if (dir.appendSystemContext) appendParts.push(dir.appendSystemContext);
+      if (dir.appendSystemContext) {
+        appendParts.push(dir.appendSystemContext);
+      }
     }
-    if (prependParts.length === 0) return undefined;
+    if (prependParts.length === 0) {
+      return undefined;
+    }
     return {
       prependContext: prependParts.join("\n\n"),
       appendSystemContext: appendParts.length > 0 ? appendParts.join("\n") : undefined,
@@ -356,9 +384,13 @@ export class ContentScanner {
   async onBeforeToolCall(
     input: ScannerBeforeToolCallInput,
   ): Promise<ScannerBeforeToolCallResult | undefined> {
-    if (!this.isEnforcing()) return undefined;
+    if (!this.isEnforcing()) {
+      return undefined;
+    }
     const state = this.runs.getStateByRun(input.runId);
-    if (!state || state.detections.length === 0) return undefined;
+    if (!state || state.detections.length === 0) {
+      return undefined;
+    }
 
     const hasCase1a = state.detections.some((d) => caseOf(d.class) === "1a");
     if (hasCase1a) {
@@ -372,11 +404,11 @@ export class ContentScanner {
 
     const hasScopeExpansion = state.detections.some((d) => d.class === "scope-expansion");
     if (hasScopeExpansion && this.approvalOnScopeExpansion()) {
-      const paramsPreview = (() => {
+      const paramsPreview = ((): string => {
         try {
           return JSON.stringify(input.params ?? {}, null, 2).slice(0, 300);
         } catch {
-          return String(input.params ?? "").slice(0, 300);
+          return "[unserializable params]";
         }
       })();
       return {
@@ -403,13 +435,19 @@ export class ContentScanner {
   async onMessageSending(
     input: ScannerMessageSendingInput,
   ): Promise<ScannerMessageSendingResult | undefined> {
-    if (!this.isEnforcing()) return undefined;
+    if (!this.isEnforcing()) {
+      return undefined;
+    }
 
     const content = input.content ?? "";
-    if (!content) return undefined;
+    if (!content) {
+      return undefined;
+    }
 
     const scan: EgressScanResult = scanEgress(content, this.egressRules);
-    if (scan.matches.length === 0) return undefined;
+    if (scan.matches.length === 0) {
+      return undefined;
+    }
 
     const kinds = scan.matches.map((m) => `${m.kind}×${m.count}`).join(", ");
 
@@ -432,7 +470,9 @@ export class ContentScanner {
 
   /** Drop everything keyed off the ended session. */
   onSessionEnd(input: ScannerSessionEndInput): void {
-    if (!input.sessionKey && !input.sessionId) return;
+    if (!input.sessionKey && !input.sessionId) {
+      return;
+    }
     this.runs.dropSession(input.sessionKey, input.sessionId);
   }
 
@@ -533,7 +573,9 @@ export function reconfigureContentScanner(config: ContentScannerConfig): void {
 }
 
 export function getContentScanner(): ContentScanner {
-  if (!singleton) singleton = new ContentScanner({ mode: "off" });
+  if (!singleton) {
+    singleton = new ContentScanner({ mode: "off" });
+  }
   return singleton;
 }
 

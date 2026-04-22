@@ -195,7 +195,7 @@ export async function runBeforeToolCallHook(args: {
       const scannerDecision = await scanner.onBeforeToolCall({
         toolName,
         runId: args.ctx?.runId,
-        params: isPlainObject(params) ? (params as Record<string, unknown>) : {},
+        params: isPlainObject(params) ? params : {},
       });
       if (scannerDecision && "block" in scannerDecision && scannerDecision.block) {
         return {

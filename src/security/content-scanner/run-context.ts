@@ -44,41 +44,57 @@ export class ContentScannerRunContext {
   }
 
   getStateByRun(runId: string | undefined): SecurityRunState | undefined {
-    if (!runId) return undefined;
+    if (!runId) {
+      return undefined;
+    }
     return this.byRun.get(runId);
   }
 
   getDetectionByToolCallId(toolCallId: string | undefined): Detection | undefined {
-    if (!toolCallId) return undefined;
+    if (!toolCallId) {
+      return undefined;
+    }
     const runId = this.toolCallToRun.get(toolCallId);
-    if (!runId) return undefined;
+    if (!runId) {
+      return undefined;
+    }
     const state = this.byRun.get(runId);
     return state?.detections.find((d) => d.toolCallId === toolCallId);
   }
 
   hasAnyDetection(runId: string | undefined): boolean {
-    if (!runId) return false;
+    if (!runId) {
+      return false;
+    }
     const state = this.byRun.get(runId);
     return !!state && state.detections.length > 0;
   }
 
   dropRun(runId: string | undefined): void {
-    if (!runId) return;
+    if (!runId) {
+      return;
+    }
     const state = this.byRun.get(runId);
     if (state) {
-      for (const id of state.interceptedToolCallIds) this.toolCallToRun.delete(id);
+      for (const id of state.interceptedToolCallIds) {
+        this.toolCallToRun.delete(id);
+      }
     }
     this.byRun.delete(runId);
   }
 
   dropSession(sessionKey: string | undefined, sessionId: string | undefined): void {
-    if (!sessionKey && !sessionId) return;
+    if (!sessionKey && !sessionId) {
+      return;
+    }
     for (const [runId, state] of this.byRun) {
       if (
         (sessionKey && state.sessionKey === sessionKey) ||
         (sessionId && state.sessionId === sessionId)
       ) {
-        for (const id of state.interceptedToolCallIds) this.toolCallToRun.delete(id);
+        for (const id of state.interceptedToolCallIds) {
+          this.toolCallToRun.delete(id);
+        }
         this.byRun.delete(runId);
       }
     }

@@ -64,11 +64,15 @@ export function guardSessionManager(
               toolCallId: meta.toolCallId,
               message: current,
             });
-            if (scanned?.message) current = scanned.message;
+            if (scanned?.message) {
+              current = scanned.message;
+            }
           } catch {
             // Never let scanner failure block transcript writes.
           }
-          if (!hookRunnerHasToolResultPersist || !hookRunner) return current;
+          if (!hookRunnerHasToolResultPersist || !hookRunner) {
+            return current;
+          }
           const out = hookRunner.runToolResultPersist(
             {
               toolName: meta.toolName,

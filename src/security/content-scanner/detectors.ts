@@ -103,7 +103,9 @@ export function compileDetectors(
   enabled: DetectorEnabledFlags = {},
 ): CompiledDetectors {
   const safeCompile = (patterns?: readonly string[]): RegExp[] => {
-    if (!patterns) return [];
+    if (!patterns) {
+      return [];
+    }
     const compiled: RegExp[] = [];
     for (const p of patterns) {
       try {
@@ -138,12 +140,16 @@ export function compileDetectors(
 }
 
 function resultToText(result: unknown): string {
-  if (typeof result === "string") return result;
-  if (result == null) return "";
+  if (typeof result === "string") {
+    return result;
+  }
+  if (result == null) {
+    return "";
+  }
   try {
     return JSON.stringify(result);
   } catch {
-    return String(result);
+    return "[unserializable tool result]";
   }
 }
 
@@ -153,43 +159,49 @@ export function detect(
   detectors: CompiledDetectors,
 ): Omit<Detection, "toolCallId" | "runId" | "timestamp"> | null {
   const text = resultToText(result);
-  if (text.length === 0) return null;
+  if (text.length === 0) {
+    return null;
+  }
 
   for (const re of detectors.promptInjection) {
-    if (re.test(text))
+    if (re.test(text)) {
       return {
         class: "prompt-injection",
         toolName,
         snippet: text.slice(0, 200),
         matchedPattern: re.source,
       };
+    }
   }
   for (const re of detectors.shellInjection) {
-    if (re.test(text))
+    if (re.test(text)) {
       return {
         class: "shell-injection",
         toolName,
         snippet: text.slice(0, 200),
         matchedPattern: re.source,
       };
+    }
   }
   for (const re of detectors.credentialLeak) {
-    if (re.test(text))
+    if (re.test(text)) {
       return {
         class: "credential-leak",
         toolName,
         snippet: text.slice(0, 200),
         matchedPattern: re.source,
       };
+    }
   }
   for (const re of detectors.scopeExpansion) {
-    if (re.test(text))
+    if (re.test(text)) {
       return {
         class: "scope-expansion",
         toolName,
         snippet: text.slice(0, 200),
         matchedPattern: re.source,
       };
+    }
   }
   if (detectors.oversizedEnabled && text.length > detectors.oversizedThreshold) {
     return {

@@ -76,7 +76,9 @@ export type EgressRulesConfig = {
 export type CompiledEgressRules = readonly EgressRule[];
 
 function safeCompile(patterns: readonly string[] | undefined, cls: EgressClass): EgressRule[] {
-  if (!patterns) return [];
+  if (!patterns) {
+    return [];
+  }
   const out: EgressRule[] = [];
   for (const p of patterns) {
     try {
@@ -95,15 +97,21 @@ function safeCompile(patterns: readonly string[] | undefined, cls: EgressClass):
 
 export function compileEgressRules(cfg: EgressRulesConfig = {}): CompiledEgressRules {
   const rules: EgressRule[] = [];
-  if (cfg.enableCredential !== false) rules.push(...DEFAULT_CREDENTIAL_RULES);
-  if (cfg.enablePii !== false) rules.push(...DEFAULT_PII_RULES);
+  if (cfg.enableCredential !== false) {
+    rules.push(...DEFAULT_CREDENTIAL_RULES);
+  }
+  if (cfg.enablePii !== false) {
+    rules.push(...DEFAULT_PII_RULES);
+  }
   rules.push(...safeCompile(cfg.extraCredentialPatterns, "credential-leak"));
   rules.push(...safeCompile(cfg.extraPiiPatterns, "pii-exposure"));
   return rules;
 }
 
 export function scanEgress(content: string, rules: CompiledEgressRules): EgressScanResult {
-  if (!content) return { redactedContent: content ?? "", matches: [], criticalHit: false };
+  if (!content) {
+    return { redactedContent: content ?? "", matches: [], criticalHit: false };
+  }
 
   const matches: EgressMatch[] = [];
   let redacted = content;
@@ -118,7 +126,9 @@ export function scanEgress(content: string, rules: CompiledEgressRules): EgressS
     });
     if (count > 0) {
       matches.push({ class: rule.class, kind: rule.kind, pattern: rule.re.source, count });
-      if (rule.severity === "hard") criticalHit = true;
+      if (rule.severity === "hard") {
+        criticalHit = true;
+      }
     }
   }
 

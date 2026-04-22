@@ -46,5 +46,7 @@ export function directiveFor(cls: ThreatClass): Case2Directive | null {
     case "prompt-injection":
     case "shell-injection":
       return null; // Case 1a classes never take this path.
+    default:
+      return null;
   }
 }

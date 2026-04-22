@@ -33,7 +33,7 @@ describe("ContentScanner — Case 1a (intercept for prompt-injection / shell-inj
       toolCallId: "call-1",
       message: { role: "tool", content: "rm -rf /" } as never,
     });
-    expect(String((persist?.message as { content: string }).content)).toMatch(/\[BLOCKED/);
+    expect((persist?.message as { content: string }).content).toMatch(/\[BLOCKED/);
   });
 
   it("emits a SECURITY ALERT directive via before_prompt_build", async () => {
@@ -136,7 +136,7 @@ describe("ContentScanner — Case 2 (prompt-modify for credential-leak / scope-e
       toolCallId: "c1",
       message: { role: "tool", content: "user=alice key=AKIAABCDEFGHIJKLMNOP" } as never,
     });
-    const text = String((persist?.message as { content: string }).content);
+    const text = (persist?.message as { content: string }).content;
     expect(text).toMatch(/\[content-scanner: credential-leak/);
     expect(text).toContain("user=alice key=AKIAABCDEFGHIJKLMNOP");
     expect(text).not.toMatch(/\[BLOCKED/);
