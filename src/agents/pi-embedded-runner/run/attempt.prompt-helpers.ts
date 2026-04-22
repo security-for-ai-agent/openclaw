@@ -9,6 +9,7 @@ import type {
   PluginHookBeforePromptBuildResult,
 } from "../../../plugins/types.js";
 import { isCronSessionKey, isSubagentSessionKey } from "../../../routing/session-key.js";
+import { getContentScanner } from "../../../security/content-scanner/index.js";
 import { joinPresentTextSegments } from "../../../shared/text/join-segments.js";
 import { resolveHeartbeatPromptForSystemPrompt } from "../../heartbeat-system-prompt.js";
 import { buildActiveMusicGenerationTaskPromptContextForSession } from "../../music-generation-task-status.js";
@@ -54,6 +55,14 @@ export async function resolvePromptBuildHookResult(params: {
           return undefined;
         })
     : undefined;
+  // Core content scanner result is merged with the plugin result below. Either
+  // may be absent; joinPresentTextSegments handles the undefined cases.
+  const scannerResult = await getContentScanner()
+    .onBeforePromptBuild({ runId: params.hookCtx.runId })
+    .catch((err: unknown) => {
+      log.warn(`content-scanner before_prompt_build failed: ${String(err)}`);
+      return undefined;
+    });
   const legacyResult =
     params.legacyBeforeAgentStartResult ??
     (params.hookRunner?.hasHooks("before_agent_start")
@@ -75,6 +84,7 @@ export async function resolvePromptBuildHookResult(params: {
   return {
     systemPrompt: promptBuildResult?.systemPrompt ?? legacyResult?.systemPrompt,
     prependContext: joinPresentTextSegments([
+      scannerResult?.prependContext,
       promptBuildResult?.prependContext,
       legacyResult?.prependContext,
     ]),
@@ -83,6 +93,7 @@ export async function resolvePromptBuildHookResult(params: {
       legacyResult?.prependSystemContext,
     ]),
     appendSystemContext: joinPresentTextSegments([
+      scannerResult?.appendSystemContext,
       promptBuildResult?.appendSystemContext,
       legacyResult?.appendSystemContext,
     ]),

@@ -29,6 +29,7 @@ import { createInternalHookEvent, triggerInternalHook } from "../hooks/internal-
 import { getSessionBindingService } from "../infra/outbound/session-binding-service.js";
 import { closeTrackedBrowserTabsForSessions } from "../plugin-sdk/browser-maintenance.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
+import { getContentScanner } from "../security/content-scanner/index.js";
 import {
   isSubagentSessionKey,
   normalizeAgentId,
@@ -106,6 +107,16 @@ export function emitGatewaySessionEndPluginHook(params: {
 }): void {
   if (!params.sessionId) {
     return;
+  }
+  // Drop core content-scanner state for the ended session even when no plugin
+  // hook is registered. Keyed off sessionId / sessionKey.
+  try {
+    getContentScanner().onSessionEnd({
+      sessionKey: params.sessionKey,
+      sessionId: params.sessionId,
+    });
+  } catch (err) {
+    logVerbose(`content-scanner session_end failed: ${String(err)}`);
   }
   const hookRunner = getGlobalHookRunner();
   if (!hookRunner?.hasHooks("session_end")) {

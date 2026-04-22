@@ -21,6 +21,7 @@ import { asNullableRecord } from "../shared/record-coerce.js";
 import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 import { collectDeepCodeSafetyFindings } from "./audit-deep-code-safety.js";
 import { collectDeepProbeFindings } from "./audit-deep-probe-findings.js";
+import { getContentScanner } from "./content-scanner/index.js";
 import {
   formatPermissionDetail,
   formatPermissionRemediation,
@@ -959,6 +960,9 @@ export async function runSecurityAudit(opts: SecurityAuditOptions): Promise<Secu
   findings.push(...auditNonDeep.collectSmallModelRiskFindings({ cfg, env }));
   findings.push(...auditNonDeep.collectExposureMatrixFindings(cfg));
   findings.push(...auditNonDeep.collectLikelyMultiUserSetupFindings(cfg));
+  // Core content scanner contributes its own mode / threat-off / kill-switch
+  // findings alongside the other non-plugin audit collectors.
+  findings.push(...getContentScanner().collectAuditFindings(env));
 
   if (context.includeFilesystem) {
     findings.push(
